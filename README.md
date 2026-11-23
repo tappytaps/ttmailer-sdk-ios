@@ -12,13 +12,13 @@ privacy (App Store), troubleshooting and the API reference.
 ### Swift Package Manager (recommended)
 
 In Xcode: File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios`. Choose *Up to Next Minor
-Version* from `0.2.0` and add the `TTMailer` library to the app target.
+Version* from `0.2.1` and add the `TTMailer` library to the app target.
 
 Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.2.0"),
+    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.2.1"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "TTMailer", package: "ttmailer-sdk-ios")]),
@@ -28,7 +28,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.2.0'
+pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.2.1'
 ```
 
 The SDK includes its privacy manifest (`PrivacyInfo.xcprivacy`).
@@ -81,7 +81,7 @@ TTMailer.setLanguage("de")
 TTMailer.addTags(["sportovec"])
 
 // Premium: read from StoreKit 2 (off by default) …
-TTMailer.enableAutomaticPurchases(lifetimeProductIds: ["pro_lifetime"])
+TTMailer.enableAutomaticPurchases()
 // … or reported by the app (e.g. from RevenueCat):
 TTMailer.setPremium(until: expirationDate, kind: "paid")
 ```

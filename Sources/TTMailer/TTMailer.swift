@@ -10,6 +10,7 @@ public enum TTMailer {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var engine: Engine?
     nonisolated(unsafe) private static var observer: NSObjectProtocol?
+    nonisolated(unsafe) private static var automaticPurchases = false
     nonisolated(unsafe) private static var lifetimeProducts: Set<String>?
     nonisolated(unsafe) private static var storeObserver: Task<Void, Never>?
 
@@ -105,12 +106,15 @@ public enum TTMailer {
 
     /// Turns on the automatic premium (off by default): the SDK reads the user's purchases from StoreKit 2 at launch,
     /// when the app becomes active and on every new transaction, and tells TTMailer the subscription's end and kind
-    /// (`trial` / `paid`) and the one-time products owned (tags `koupeno_<product>`). Products in `lifetimeProductIds`
-    /// make a lifetime premium. Call it after `configure` on every launch. Use it or `setPremium`, not both.
-    public static func enableAutomaticPurchases(lifetimeProductIds: Set<String> = []) {
+    /// (`trial` / `paid`) and the one-time products owned (tags `koupeno_<product>`). Every non-consumable makes a
+    /// lifetime premium; an app that also sells add-ons (e.g. a theme pack) names the ones that unlock the app in
+    /// `lifetimeProductIds`, the others are only tags. Call it after `configure` on every launch. Use it or
+    /// `setPremium`, not both.
+    public static func enableAutomaticPurchases(lifetimeProductIds: Set<String>? = nil) {
         #if canImport(StoreKit)
         guard #available(iOS 15.0, macOS 12.0, *) else { return }
         lock.lock()
+        automaticPurchases = true
         lifetimeProducts = lifetimeProductIds
         storeObserver?.cancel()
         storeObserver = StoreReader.observe { await readStore() }
@@ -122,8 +126,8 @@ public enum TTMailer {
     static func readStore() async {
         #if canImport(StoreKit)
         guard #available(iOS 15.0, macOS 12.0, *) else { return }
-        let (e, products): (Engine?, Set<String>?) = { lock.lock(); defer { lock.unlock() }; return (engine, lifetimeProducts) }()
-        guard let e, let products else { return }
+        let (e, on, products): (Engine?, Bool, Set<String>?) = { lock.lock(); defer { lock.unlock() }; return (engine, automaticPurchases, lifetimeProducts) }()
+        guard let e, on else { return }
         await e.storeEntitlements(await StoreReader.entitlements(), lifetimeProducts: products)
         #endif
     }

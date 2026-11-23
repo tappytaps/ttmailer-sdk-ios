@@ -118,6 +118,15 @@ final class ChangesTests: XCTestCase {
         XCTAssertEqual(only, PremiumReport(until: nil, lifetime: false, kind: nil, startedAt: nil, products: ["themes"]))
     }
 
+    func testWithoutAListEveryNonConsumableIsLifetimeANonRenewingOneOnlyATag() {
+        let pro = Entitlement(productId: "pro", kind: .oneTime, expiresAt: nil, originalPurchaseAt: now, trial: false)
+        let season = Entitlement(productId: "season", kind: .nonRenewing, expiresAt: nil, originalPurchaseAt: now, trial: false)
+        XCTAssertEqual(PremiumReport.from([pro, season], lifetimeProducts: nil, previous: nil, now: now),
+                       PremiumReport(until: nil, lifetime: true, kind: "lifetime", startedAt: now, products: ["pro", "season"]))
+        XCTAssertEqual(PremiumReport.from([season], lifetimeProducts: nil, previous: nil, now: now),
+                       PremiumReport(until: nil, lifetime: false, kind: nil, startedAt: nil, products: ["season"]))
+    }
+
     func testNothingActiveEndsAnEarlierPremiumNowAndNothingIsSentForANeverPayingUser() {
         let prev = PremiumReport(until: now.addingTimeInterval(10 * 86400), lifetime: false, kind: "paid", startedAt: nil, products: [])
         let r = PremiumReport.from([], lifetimeProducts: [], previous: prev, now: now)

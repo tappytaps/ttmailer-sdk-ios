@@ -26,7 +26,8 @@ public struct PremiumReport: Codable, Equatable, Sendable {
 
 /// One purchase the store says the user has now (StoreKit's current entitlements, Play Billing's purchases).
 struct Entitlement: Equatable, Sendable {
-    enum Kind: Sendable { case subscription, oneTime }
+    /// oneTime: a non-consumable (may unlock the app); nonRenewing: a non-renewing subscription (only its tag).
+    enum Kind: Sendable { case subscription, oneTime, nonRenewing }
     let productId: String
     let kind: Kind
     let expiresAt: Date?
@@ -36,11 +37,11 @@ struct Entitlement: Equatable, Sendable {
 
 extension PremiumReport {
     /// The report for what the store says now, given the last one sent. nil = nothing to tell (a user who never paid).
-    /// - A lifetime product (`lifetimeProducts`) → lifetime; else the active subscription ending last → until its end.
+    /// - A lifetime product (`lifetimeProducts`; nil = every non-consumable) → lifetime; else the active subscription ending last → until its end.
     /// - Nothing active, but the last report was premium → it ended now (a refund, a cancelled trial); kind and start stay.
-    static func from(_ entitlements: [Entitlement], lifetimeProducts: Set<String>, previous: PremiumReport?, now: Date) -> PremiumReport? {
-        let products = Array(Set(entitlements.filter { $0.kind == .oneTime }.map(\.productId))).sorted()
-        if let life = entitlements.first(where: { $0.kind == .oneTime && lifetimeProducts.contains($0.productId) }) {
+    static func from(_ entitlements: [Entitlement], lifetimeProducts: Set<String>?, previous: PremiumReport?, now: Date) -> PremiumReport? {
+        let products = Array(Set(entitlements.filter { $0.kind != .subscription }.map(\.productId))).sorted()
+        if let life = entitlements.first(where: { $0.kind == .oneTime && (lifetimeProducts?.contains($0.productId) ?? true) }) {
             return PremiumReport(until: nil, lifetime: true, kind: "lifetime", startedAt: life.originalPurchaseAt, products: products)
         }
         let subs = entitlements.filter { $0.kind == .subscription && ($0.expiresAt.map { $0 > now } ?? false) }

@@ -207,7 +207,7 @@ actor Engine {
     }
 
     /// What the store says now (automatic purchases): a report when it differs from the last one sent.
-    func storeEntitlements(_ entitlements: [Entitlement], lifetimeProducts: Set<String>) async {
+    func storeEntitlements(_ entitlements: [Entitlement], lifetimeProducts: Set<String>?) async {
         guard let r = PremiumReport.from(entitlements, lifetimeProducts: lifetimeProducts, previous: pendingPremium ?? sentPremium, now: now()) else { return }
         await setPremium(r)
     }

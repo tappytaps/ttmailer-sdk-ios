@@ -63,13 +63,13 @@ stops working at once. *Disable* stops an app without deleting it.
 ### Swift Package Manager (recommended)
 
 Xcode → File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios`. Choose *Up to Next Minor
-Version* from `0.2.0` and add the `TTMailer` library to the app target.
+Version* from `0.2.1` and add the `TTMailer` library to the app target.
 
 In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.2.0"),
+    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.2.1"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "TTMailer", package: "ttmailer-sdk-ios")]),
@@ -79,7 +79,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.2.0'
+pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.2.1'
 ```
 
 ### Xcode capabilities
@@ -260,12 +260,16 @@ active and on every new transaction (renewals, refunds, purchases on another dev
 
 ```swift
 TTMailer.configure(appKey: "tta_…")
-TTMailer.enableAutomaticPurchases(lifetimeProductIds: ["pro_lifetime"])
+TTMailer.enableAutomaticPurchases()
 ```
 
+An app that also sells add-ons (e.g. a theme pack) names the products that unlock the app:
+`enableAutomaticPurchases(lifetimeProductIds: ["pro_lifetime"])`.
+
 - An active auto-renewable subscription: premium until its end, kind `trial` (a free trial) or `paid`.
-- A product in `lifetimeProductIds`: a lifetime premium.
-- Every one-time product owned (non-consumable, non-renewing): a tag `koupeno_<product>` (lowercase, other characters
+- A one-time purchase that unlocks the app: a lifetime premium. Without `lifetimeProductIds` that is every
+  non-consumable; with it only the products listed.
+- Every one-time product owned (non-consumable, non-renewing subscription): a tag `koupeno_<product>` (lowercase, other characters
   `_`), e.g. `koupeno_themes_pack`. A refunded product loses its tag.
 - A refund or a revoked subscription ends the premium at once; an expired one ends on its own date.
 - Consumables (coins, credits) are not reported.
@@ -372,7 +376,7 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
 | `addTags(_: [String])` / `removeTags(_: [String])` | Tags of the user's contact. |
 | `setPremium(until:kind:startedAt:)` | The premium as the app knows it. |
 | `setLifetimePremium(kind:startedAt:)` | A lifetime premium. |
-| `enableAutomaticPurchases(lifetimeProductIds:)` | The premium read from StoreKit 2 (off by default). |
+| `enableAutomaticPurchases(lifetimeProductIds: Set<String>? = nil)` | The premium read from StoreKit 2 (off by default). |
 
 `TTMailerError`:
 

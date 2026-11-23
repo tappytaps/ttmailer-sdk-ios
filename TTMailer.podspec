@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'TTMailer'
-  s.version          = '0.2.0'
+  s.version          = '0.2.1'
   s.summary          = 'TTMailer SDK: push token registration, newsletter sign-up with confirmation and push open reports.'
   s.description      = <<-DESC
     Small, dependency-free SDK for apps without their own backend: registers the installation and its APNs token in

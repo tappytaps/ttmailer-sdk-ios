@@ -15,7 +15,7 @@ enum StoreReader {
                 out.append(Entitlement(productId: t.productID, kind: .subscription, expiresAt: t.expirationDate,
                                        originalPurchaseAt: t.originalPurchaseDate, trial: isTrial(t)))
             case .nonConsumable, .nonRenewable:
-                out.append(Entitlement(productId: t.productID, kind: .oneTime, expiresAt: nil,
+                out.append(Entitlement(productId: t.productID, kind: t.productType == .nonConsumable ? .oneTime : .nonRenewing, expiresAt: nil,
                                        originalPurchaseAt: t.originalPurchaseDate, trial: false))
             default:
                 continue
