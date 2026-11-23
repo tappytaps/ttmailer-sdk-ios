@@ -6,8 +6,8 @@ dependencies, iOS 15+. The server API is described in `docs/sdk-api.md` of the T
 
 ## Install
 
-**Swift Package Manager:** File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios` (the repository
-location is still to be decided), product `TTMailer`.
+**Swift Package Manager:** File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios` (tag `0.1.0`),
+product `TTMailer`.
 
 **CocoaPods:**
 
