@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "TTMailer", targets: ["TTMailer"]),
     ],
     targets: [
-        .target(name: "TTMailer", path: "Sources/TTMailer"),
+        .target(name: "TTMailer", path: "Sources/TTMailer", resources: [.copy("PrivacyInfo.xcprivacy")]),
         .testTarget(name: "TTMailerTests", dependencies: ["TTMailer"], path: "Tests/TTMailerTests"),
     ]
 )

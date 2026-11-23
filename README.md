@@ -2,18 +2,36 @@
 
 For apps without their own backend: registers the installation and its push token in TTMailer, signs the user up to
 the newsletter (TTMailer sends a confirmation e-mail), links the app's account and reports opened pushes. No
-dependencies, iOS 15+. The server API is described in `docs/sdk-api.md` of the TTMailer repository.
+dependencies, iOS 15+.
+
+**📖 Full guide: [docs/integration.md](docs/integration.md)**: the setup in TTMailer, push, accounts, the newsletter,
+privacy (App Store), troubleshooting and the API reference.
 
 ## Install
 
-**Swift Package Manager:** File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios` (tag `0.1.0`),
-product `TTMailer`.
+### Swift Package Manager (recommended)
 
-**CocoaPods:**
+In Xcode: File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios`. Choose *Up to Next Minor
+Version* from `0.1.1` and add the `TTMailer` library to the app target.
+
+Or in `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.1.1"),
+],
+targets: [
+    .target(name: "MyApp", dependencies: [.product(name: "TTMailer", package: "ttmailer-sdk-ios")]),
+]
+```
+
+### CocoaPods
 
 ```ruby
-pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.1.0'
+pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.1.1'
 ```
+
+The SDK includes its privacy manifest (`PrivacyInfo.xcprivacy`).
 
 ## Use
 
