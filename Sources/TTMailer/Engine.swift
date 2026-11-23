@@ -52,6 +52,10 @@ actor Engine {
     /// Tag changes not sent yet: tag → true (add) / false (remove); the last change of a tag wins.
     private var pendingTags: [String: Bool]
     private var pendingPremium: PremiumReport?
+    private var flushing = false
+    private var flushAgain = false
+    /// A flush found the installation being sent: it flushes when that sync ends.
+    private var flushAfterSync = false
 
     init(appKey: String, baseURL: URL, linkKey: String, transport: HTTPTransport, store: KeyValueStore,
          deviceInfo: @escaping @Sendable () -> DeviceInfo, now: @escaping @Sendable () -> Date = { Date() }, retry: Bool = true) {
@@ -120,12 +124,16 @@ actor Engine {
     func sync() async -> Bool {
         if syncing { dirty = true; return false }
         syncing = true
-        defer { syncing = false }
         var ok = false
         repeat {
             dirty = false
             ok = await syncOnce()
         } while dirty && ok
+        syncing = false
+        if ok && flushAfterSync {
+            flushAfterSync = false
+            Task { await self.flushChanges() }
+        }
         return ok
     }
 
@@ -181,7 +189,9 @@ actor Engine {
     func removeTags(_ tags: [String]) async { await changeTags(tags, add: false) }
 
     private func changeTags(_ tags: [String], add: Bool) async {
-        let clean = tags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty }
+        // What TTMailer takes (a-z 0-9 _ -, 40 at most): one bad tag must not lose the others of its request.
+        let clean = tags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { $0.range(of: "^[a-z0-9_-]{1,40}$", options: .regularExpression) != nil }
         guard !clean.isEmpty else { return }
         for t in clean { pendingTags[t] = add }
         saveTags()
@@ -205,15 +215,30 @@ actor Engine {
     var sentPremium: PremiumReport? { store.data(forKey: Key.sentPremium).flatMap { try? JSONDecoder().decode(PremiumReport.self, from: $0) } }
 
     /// Sends waiting tag changes and the premium, after the installation (TTMailer needs it to know the contact).
+    /// One flush at a time: a change made during it is sent by the same flush, after what is in flight (order kept).
     func flushChanges() async {
         guard !pendingTags.isEmpty || pendingPremium != nil else { return }
-        guard await sync() else { return }
+        if flushing { flushAgain = true; return }
+        flushing = true
+        defer { flushing = false }
+        repeat {
+            flushAgain = false
+            guard await flushOnce() else { return }
+        } while flushAgain
+    }
+
+    private func flushOnce() async -> Bool {
+        guard !pendingTags.isEmpty || pendingPremium != nil else { return true }
+        if syncing { flushAfterSync = true; return false }
+        guard await sync() else { return false }
+        // A reset or erasure meanwhile starts a new installation: nothing of the old one is carried over.
+        let id = installationId
         while !pendingTags.isEmpty {
             let add = pendingTags.filter { $0.value }.keys.sorted().prefix(Self.tagsPerCall)
             let remove = pendingTags.filter { !$0.value }.keys.sorted().prefix(Self.tagsPerCall)
             let body = try? JSONSerialization.data(withJSONObject: ["add": Array(add), "remove": Array(remove)], options: [.sortedKeys])
-            let r = await request("POST", "/sdk/v1/installations/\(installationId)/tags", body: body)
-            guard handled(r) else { return }
+            let r = await request("POST", "/sdk/v1/installations/\(id)/tags", body: body)
+            guard installationId == id, handled(r) else { return false }
             // Only what was sent: a change made meanwhile stays.
             for t in add where pendingTags[t] == true { pendingTags[t] = nil }
             for t in remove where pendingTags[t] == false { pendingTags[t] = nil }
@@ -221,11 +246,12 @@ actor Engine {
         }
         if let p = pendingPremium {
             let body = try? JSONSerialization.data(withJSONObject: p.json, options: [.sortedKeys])
-            let r = await request("POST", "/sdk/v1/installations/\(installationId)/premium", body: body)
-            guard handled(r) else { return }
+            let r = await request("POST", "/sdk/v1/installations/\(id)/premium", body: body)
+            guard installationId == id, handled(r) else { return false }
             if case .success(let (status, _)) = r, (200..<300).contains(status) { store.set(try? JSONEncoder().encode(p), forKey: Key.sentPremium) }
             if pendingPremium == p { pendingPremium = nil; store.set(nil, forKey: Key.premium) }
         }
+        return true
     }
 
     /// True when the change is done with: sent, or refused for good (a 4xx). False: kept for later (network, 5xx,
@@ -234,7 +260,7 @@ actor Engine {
         guard case .success(let (status, body)) = r else { scheduleRetry(); return false }
         if (200..<300).contains(status) { return true }
         let code = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["error"] as? String
-        if status == 409, code == "unknown_installation" { store.set(nil, forKey: Key.lastBody); return false }
+        if status == 409, code == "unknown_installation" { store.set(nil, forKey: Key.lastBody); scheduleRetry(); return false }
         if status >= 500 || status == 408 || status == 429 { scheduleRetry(); return false }
         return true
     }

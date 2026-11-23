@@ -128,3 +128,59 @@ final class ChangesTests: XCTestCase {
         XCTAssertEqual(PremiumReport.from([], lifetimeProducts: [], previous: ended, now: now), ended)
     }
 }
+
+/// A transport that really suspends, so calls interleave on the actor like on a network.
+final class SlowTransport: HTTPTransport, @unchecked Sendable {
+    let inner = FakeTransport()
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        try await Task.sleep(nanoseconds: 20_000_000)
+        return try await inner.send(request)
+    }
+}
+
+final class ConcurrencyTests: XCTestCase {
+    func engine(_ t: HTTPTransport, _ s: MemoryStore) -> Engine {
+        Engine(appKey: "tta_ABCDEFGHIJKLMNOPQRSTUVWX", baseURL: URL(string: "https://mailer.example.com")!, linkKey: "redirectUrl",
+               transport: t, store: s, deviceInfo: { DeviceInfo(language: "cs", timeZone: nil, appVersion: nil, osVersion: nil) }, retry: false)
+    }
+
+    func testTagsAddedDuringARunningSyncAreSentWhenItEnds() async {
+        let t = SlowTransport(), s = MemoryStore()
+        let e = engine(t, s)
+        async let first = e.sync()
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        await e.addTags(["x"])
+        _ = await first
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let pending = await e.pendingTagCount
+        XCTAssertEqual(pending, 0)
+        XCTAssertEqual(t.inner.sent.filter { $0.path.hasSuffix("/tags") }.count, 1)
+    }
+
+    func testTwoFlushesAtOnceSendEachChangeOnceAndInOrder() async {
+        let t = SlowTransport(), s = MemoryStore()
+        let e = engine(t, s)
+        _ = await e.sync()
+        async let a: Void = e.addTags(["x"])
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        async let b: Void = e.removeTags(["x"])
+        _ = await (a, b)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let tags = t.inner.sent.filter { $0.path.hasSuffix("/tags") }
+        XCTAssertEqual(tags.map { ($0.json?["add"] as? [String]) ?? [] }, [["x"], []])
+        XCTAssertEqual(tags.last?.json?["remove"] as? [String], ["x"])
+    }
+
+    func testAResetDuringAFlushDoesNotCarryTheOldPremiumOver() async throws {
+        let t = SlowTransport(), s = MemoryStore()
+        let e = engine(t, s)
+        _ = await e.sync()
+        let r = PremiumReport(until: Date().addingTimeInterval(86400), lifetime: false, kind: "paid", startedAt: nil, products: nil)
+        async let p: Void = e.setPremium(r)
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        try await e.reset()
+        _ = await p
+        let sent = await e.sentPremium
+        XCTAssertNil(sent, "the new installation has sent nothing")
+    }
+}
