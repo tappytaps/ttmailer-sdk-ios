@@ -10,12 +10,13 @@ overview see the [README](../README.md).
 - [5. Push notifications](#5-push-notifications)
 - [6. User accounts](#6-user-accounts)
 - [7. Newsletter sign-up](#7-newsletter-sign-up)
-- [8. Reset and account deletion](#8-reset-and-account-deletion)
-- [9. How the SDK behaves](#9-how-the-sdk-behaves)
-- [10. Privacy](#10-privacy)
-- [11. Testing and troubleshooting](#11-testing-and-troubleshooting)
-- [12. API reference](#12-api-reference)
-- [13. The server API](#13-the-server-api)
+- [8. Language, tags and premium](#8-language-tags-and-premium)
+- [9. Reset and account deletion](#9-reset-and-account-deletion)
+- [10. How the SDK behaves](#10-how-the-sdk-behaves)
+- [11. Privacy](#11-privacy)
+- [12. Testing and troubleshooting](#12-testing-and-troubleshooting)
+- [13. API reference](#13-api-reference)
+- [14. The server API](#14-the-server-api)
 
 ## 1. What the SDK does
 
@@ -62,13 +63,13 @@ stops working at once. *Disable* stops an app without deleting it.
 ### Swift Package Manager (recommended)
 
 Xcode → File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios`. Choose *Up to Next Minor
-Version* from `0.1.1` and add the `TTMailer` library to the app target.
+Version* from `0.2.0` and add the `TTMailer` library to the app target.
 
 In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.1.1"),
+    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.2.0"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "TTMailer", package: "ttmailer-sdk-ios")]),
@@ -78,7 +79,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.1.1'
+pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.2.0'
 ```
 
 ### Xcode capabilities
@@ -227,7 +228,62 @@ func signUp(_ email: String) async {
   is only subscribed and never merged into the installation. So the app key can never take over a known person.
 - `noForm` and `formWithoutConfirmation` are setup errors (section 2): the app has no form, or the form does not confirm.
 
-## 8. Reset and account deletion
+## 8. Language, tags and premium
+
+### The app's own language
+
+```swift
+TTMailer.setLanguage("de")   // the user picked German in the app
+TTMailer.setLanguage(nil)    // back to the system language
+```
+
+TTMailer writes to the user in this language (e-mails and pushes with language variants). Kept between launches.
+
+### Tags
+
+```swift
+TTMailer.addTags(["sportovec"])
+TTMailer.removeTags(["beta"])
+```
+
+Tags of the user's contact, for audiences in TTMailer (e.g. people who use one feature). Keys: a-z, 0-9, `_` and `-`,
+40 at most; uppercase is lowered. They wait offline and are sent with the installation. A tag the SDK adds can be
+removed by the team in TTMailer and vice versa.
+
+### Premium (purchases)
+
+TTMailer keeps the user's premium (until when, its kind, since when) for audiences like "trial ended, did not buy".
+Two ways, pick one:
+
+**Automatic (off by default).** The SDK reads the user's purchases from StoreKit 2 at launch, when the app becomes
+active and on every new transaction (renewals, refunds, purchases on another device):
+
+```swift
+TTMailer.configure(appKey: "tta_…")
+TTMailer.enableAutomaticPurchases(lifetimeProductIds: ["pro_lifetime"])
+```
+
+- An active auto-renewable subscription: premium until its end, kind `trial` (a free trial) or `paid`.
+- A product in `lifetimeProductIds`: a lifetime premium.
+- Every one-time product owned (non-consumable, non-renewing): a tag `koupeno_<product>` (lowercase, other characters
+  `_`), e.g. `koupeno_themes_pack`. A refunded product loses its tag.
+- A refund or a revoked subscription ends the premium at once; an expired one ends on its own date.
+- Consumables (coins, credits) are not reported.
+- The SDK only reads: it never finishes transactions; the app keeps doing that.
+
+**Manual**, e.g. with RevenueCat:
+
+```swift
+TTMailer.setPremium(until: info.expirationDate, kind: info.periodType == .trial ? "trial" : "paid", startedAt: info.originalPurchaseDate)
+TTMailer.setLifetimePremium()
+```
+
+A date in the past says the premium ended. Each is sent once, again only when it changes.
+
+The purchases are not verified with Apple: anyone could send any premium for their own installation (never for another
+user). That is fine for marketing audiences; never grant anything because of them.
+
+## 9. Reset and account deletion
 
 ```swift
 try await TTMailer.deleteContact()   // the user deleted their account in the app (GDPR erasure)
@@ -243,29 +299,29 @@ try await TTMailer.reset()           // a "reset app" / "sign out everywhere" ac
 - Both throw on network errors (`TTMailerError.network`), so the app can retry. Nothing changes locally until TTMailer
   confirms.
 
-## 9. How the SDK behaves
+## 10. How the SDK behaves
 
 - **When it sends.**
   - The installation is sent at launch, on every change and when the app becomes active.
   - It holds the installation id (a random UUID), the token, the switch, the user id, the device language, time zone,
-    app version and iOS version.
+    app version and iOS version (or the language set with `setLanguage`).
   - It is not sent when nothing changed and the last send is less than a day old. The daily send keeps "last active in
     the app" on the contact.
 - **Offline.**
   - Updates never fail from the app's point of view; the SDK keeps the state and sends it later.
   - A failed send is retried on the next change or activation.
-  - Opens are queued.
+  - Opens, tags and the premium are queued and sent after the installation.
 - **An unknown or disabled key** (404) is retried after a day, not on every launch.
 - **Storage.** A `UserDefaults` suite `com.tappytaps.ttmailer.sdk`.
   - Deleting the app clears it; a reinstall is a new installation.
   - TTMailer removes the old device when the new installation sends the same push token, so a push never arrives twice.
 - **Threads.** The state lives in an actor; the public methods are safe from any thread. `subscribe`, `reset` and
   `deleteContact` are `async throws`.
-- **Size.** No dependencies, no background tasks, no swizzling: the app calls the SDK where it wants to.
+- **Size.** No dependencies (StoreKit only with the automatic premium), no background tasks, no swizzling: the app calls the SDK where it wants to.
 
-## 10. Privacy
+## 11. Privacy
 
-The SDK sends only what is listed in section 9, plus an e-mail address the user types for the newsletter. It does not
+The SDK sends only what is listed in section 10, plus an e-mail address the user types for the newsletter. It does not
 use the IDFA and does not track across apps.
 
 For the App Store privacy details:
@@ -276,11 +332,12 @@ For the App Store privacy details:
 | Email address (only with the newsletter) | yes | no | App functionality, developer's marketing |
 | User ID (only with `setUserId`) | yes | no | App functionality |
 | Product interaction (push opens) | yes | no | Analytics |
+| Purchase history (only with the premium, automatic or `setPremium`) | yes | no | Developer's marketing |
 
 The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types and its one required-reason API:
 `UserDefaults` (reason `CA92.1`, its own state). Xcode merges it into the app's privacy report.
 
-## 11. Testing and troubleshooting
+## 12. Testing and troubleshooting
 
 - **Does TTMailer see the installation?** In TTMailer → Kontakty, find the contact with external id
   `sdk:i:<installation id>`, or `sdk:u:<user id>` after a sign-in. It should have a device `sdk:<installation id>`. The
@@ -297,7 +354,7 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
 - **Everything fails with a 404 in the log.** The key is wrong, rotated or disabled, or the project is archived.
 - **A test server.** `TTMailer.configure(appKey:baseURL:)` with its URL and a key from that server.
 
-## 12. API reference
+## 13. API reference
 
 | Method | Description |
 |---|---|
@@ -311,6 +368,11 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
 | `reset() async throws` | Removes this installation and starts a new one. |
 | `deleteContact() async throws` | Erases the user's contact (account deletion). |
 | `installationId() async -> String?` | The current installation id. |
+| `setLanguage(_: String?)` | The app's own language; `nil` = the system's. |
+| `addTags(_: [String])` / `removeTags(_: [String])` | Tags of the user's contact. |
+| `setPremium(until:kind:startedAt:)` | The premium as the app knows it. |
+| `setLifetimePremium(kind:startedAt:)` | A lifetime premium. |
+| `enableAutomaticPurchases(lifetimeProductIds:)` | The premium read from StoreKit 2 (off by default). |
 
 `TTMailerError`:
 
@@ -324,7 +386,7 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
 | `network` | No connection or a timeout. |
 | `server(status:code:)` | Any other answer. |
 
-## 13. The server API
+## 14. The server API
 
 The SDK is a thin client of TTMailer's public SDK API. Every call carries the header `X-TTMailer-App-Key`.
 

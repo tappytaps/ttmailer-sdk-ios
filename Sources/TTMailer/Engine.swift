@@ -7,6 +7,8 @@ struct Desired: Codable, Equatable {
     /// Set by the app: true once setUserId was called (then userId nil = signed out, sent as null).
     var userIdSet = false
     var userId: String?
+    /// The app's own language (TTM-584); nil = the system's.
+    var language: String?
 }
 
 struct PendingOpen: Codable, Equatable {
@@ -23,7 +25,12 @@ actor Engine {
         static let lastAt = "lastSentAt"
         static let deadKeyAt = "deadKeyAt"
         static let opens = "pendingOpens"
+        static let tags = "pendingTags"
+        static let premium = "pendingPremium"
+        static let sentPremium = "sentPremium"
     }
+    /// Tags per request (the server takes 20 in each list).
+    static let tagsPerCall = 20
     /// An unchanged installation is still sent once a day (the contact's "last active in the app").
     static let resendAfter: TimeInterval = 24 * 3600
     static let maxPendingOpens = 100
@@ -42,6 +49,9 @@ actor Engine {
     private var dirty = false
     private var retryTask: Task<Void, Never>?
     private var retryDelay: TimeInterval = 30
+    /// Tag changes not sent yet: tag → true (add) / false (remove); the last change of a tag wins.
+    private var pendingTags: [String: Bool]
+    private var pendingPremium: PremiumReport?
 
     init(appKey: String, baseURL: URL, linkKey: String, transport: HTTPTransport, store: KeyValueStore,
          deviceInfo: @escaping @Sendable () -> DeviceInfo, now: @escaping @Sendable () -> Date = { Date() }, retry: Bool = true) {
@@ -54,6 +64,8 @@ actor Engine {
             store.set(Data(installationId.utf8), forKey: Key.installation)
         }
         desired = store.data(forKey: Key.desired).flatMap { try? JSONDecoder().decode(Desired.self, from: $0) } ?? Desired()
+        pendingTags = store.data(forKey: Key.tags).flatMap { try? JSONDecoder().decode([String: Bool].self, from: $0) } ?? [:]
+        pendingPremium = store.data(forKey: Key.premium).flatMap { try? JSONDecoder().decode(PremiumReport.self, from: $0) }
     }
 
     var pendingOpens: Int { loadOpens().count }
@@ -75,6 +87,11 @@ actor Engine {
         await change { $0.userIdSet = true; $0.userId = (id?.isEmpty ?? true) ? nil : id }
     }
 
+    func setLanguage(_ language: String?) async {
+        let l = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+        await change { $0.language = (l?.isEmpty ?? true) ? nil : l }
+    }
+
     private func change(_ f: (inout Desired) -> Void) async {
         var d = desired
         f(&d)
@@ -88,7 +105,7 @@ actor Engine {
     private func body() -> Data {
         let info = deviceInfo()
         var b: [String: Any] = [:]
-        if let v = info.language { b["language"] = v }
+        if let v = desired.language ?? info.language { b["language"] = v }
         if let v = info.timeZone { b["timeZone"] = v }
         if let v = info.appVersion { b["appVersion"] = v }
         if let v = info.osVersion { b["osVersion"] = v }
@@ -153,7 +170,76 @@ actor Engine {
         retryTask = nil
         _ = await sync()
         await flushOpens()
+        await flushChanges()
     }
+
+    // MARK: - Tags and premium (TTM-584, TTM-585)
+
+    var pendingTagCount: Int { pendingTags.count }
+
+    func addTags(_ tags: [String]) async { await changeTags(tags, add: true) }
+    func removeTags(_ tags: [String]) async { await changeTags(tags, add: false) }
+
+    private func changeTags(_ tags: [String], add: Bool) async {
+        let clean = tags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty }
+        guard !clean.isEmpty else { return }
+        for t in clean { pendingTags[t] = add }
+        saveTags()
+        await flushChanges()
+    }
+
+    /// The premium the app or the store reading reports; sent once, again only when it changes.
+    func setPremium(_ report: PremiumReport) async {
+        if pendingPremium == nil, report == sentPremium { return }
+        pendingPremium = report
+        store.set(try? JSONEncoder().encode(report), forKey: Key.premium)
+        await flushChanges()
+    }
+
+    /// What the store says now (automatic purchases): a report when it differs from the last one sent.
+    func storeEntitlements(_ entitlements: [Entitlement], lifetimeProducts: Set<String>) async {
+        guard let r = PremiumReport.from(entitlements, lifetimeProducts: lifetimeProducts, previous: pendingPremium ?? sentPremium, now: now()) else { return }
+        await setPremium(r)
+    }
+
+    var sentPremium: PremiumReport? { store.data(forKey: Key.sentPremium).flatMap { try? JSONDecoder().decode(PremiumReport.self, from: $0) } }
+
+    /// Sends waiting tag changes and the premium, after the installation (TTMailer needs it to know the contact).
+    func flushChanges() async {
+        guard !pendingTags.isEmpty || pendingPremium != nil else { return }
+        guard await sync() else { return }
+        while !pendingTags.isEmpty {
+            let add = pendingTags.filter { $0.value }.keys.sorted().prefix(Self.tagsPerCall)
+            let remove = pendingTags.filter { !$0.value }.keys.sorted().prefix(Self.tagsPerCall)
+            let body = try? JSONSerialization.data(withJSONObject: ["add": Array(add), "remove": Array(remove)], options: [.sortedKeys])
+            let r = await request("POST", "/sdk/v1/installations/\(installationId)/tags", body: body)
+            guard handled(r) else { return }
+            // Only what was sent: a change made meanwhile stays.
+            for t in add where pendingTags[t] == true { pendingTags[t] = nil }
+            for t in remove where pendingTags[t] == false { pendingTags[t] = nil }
+            saveTags()
+        }
+        if let p = pendingPremium {
+            let body = try? JSONSerialization.data(withJSONObject: p.json, options: [.sortedKeys])
+            let r = await request("POST", "/sdk/v1/installations/\(installationId)/premium", body: body)
+            guard handled(r) else { return }
+            if case .success(let (status, _)) = r, (200..<300).contains(status) { store.set(try? JSONEncoder().encode(p), forKey: Key.sentPremium) }
+            if pendingPremium == p { pendingPremium = nil; store.set(nil, forKey: Key.premium) }
+        }
+    }
+
+    /// True when the change is done with: sent, or refused for good (a 4xx). False: kept for later (network, 5xx,
+    /// 408/429, or TTMailer does not know the installation: it is sent again first).
+    private func handled(_ r: Result<(Int, Data), Error>) -> Bool {
+        guard case .success(let (status, body)) = r else { scheduleRetry(); return false }
+        if (200..<300).contains(status) { return true }
+        let code = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["error"] as? String
+        if status == 409, code == "unknown_installation" { store.set(nil, forKey: Key.lastBody); return false }
+        if status >= 500 || status == 408 || status == 429 { scheduleRetry(); return false }
+        return true
+    }
+
+    private func saveTags() { store.set(pendingTags.isEmpty ? nil : try? JSONEncoder().encode(pendingTags), forKey: Key.tags) }
 
     // MARK: - Push opens
 
@@ -196,7 +282,7 @@ actor Engine {
         // The installation first, so the confirmed address joins this installation's contact.
         _ = await sync()
         var b: [String: Any] = ["email": email.trimmingCharacters(in: .whitespacesAndNewlines)]
-        if let language { b["language"] = language } else if let l = deviceInfo().language { b["language"] = l }
+        if let l = language ?? desired.language ?? deviceInfo().language { b["language"] = l }
         let data = try JSONSerialization.data(withJSONObject: b)
         let (status, body) = try check(await request("POST", "/sdk/v1/installations/\(installationId)/subscribe", body: data))
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
@@ -220,7 +306,8 @@ actor Engine {
         installationId = UUID().uuidString.lowercased()
         store.set(Data(installationId.utf8), forKey: Key.installation)
         desired = Desired()
-        for k in [Key.desired, Key.lastBody, Key.lastAt, Key.deadKeyAt] { store.set(nil, forKey: k) }
+        pendingTags = [:]; pendingPremium = nil
+        for k in [Key.desired, Key.lastBody, Key.lastAt, Key.deadKeyAt, Key.tags, Key.premium, Key.sentPremium] { store.set(nil, forKey: k) }
     }
 
     private func check(_ r: Result<(Int, Data), Error>) throws -> (Int, Data) {
