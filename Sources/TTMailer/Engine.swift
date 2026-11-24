@@ -147,8 +147,9 @@ actor Engine {
         let t = now()
         // A key TTMailer does not know (rotated, disabled, a typo): tried again after a day, not on every call.
         if let dead = date(Key.deadKeyAt), t.timeIntervalSince(dead) < Self.resendAfter { return false }
-        // Unchanged: sent again once a day only while activity is reported (the contact's "last active in the app").
-        if store.data(forKey: Key.lastBody) == b, let at = date(Key.lastAt), desired.trackActivity == false || t.timeIntervalSince(at) < Self.resendAfter { return true }
+        // Unchanged: sent again once a day ("last active in the app"; with activity reporting off it only keeps the
+        // installation alive, TTM-588).
+        if store.data(forKey: Key.lastBody) == b, let at = date(Key.lastAt), t.timeIntervalSince(at) < Self.resendAfter { return true }
         let id = installationId
         switch await request("PUT", "/sdk/v1/installations/\(id)", body: b) {
         case .success(let (status, _)) where (200..<300).contains(status):

@@ -260,8 +260,8 @@ once a day. On by default; audiences in TTMailer can then pick e.g. "used the ap
 TTMailer.setActivityTracking(false)
 ```
 
-Kept between launches. Off, the installation is still sent when it changes (token, switch, language), but never counts
-as activity.
+Kept between launches. Off, the installation is still sent (when it changes, and once a day so TTMailer keeps it), but
+never counts as activity. To make sure the very first launch reports nothing, call it right after `configure`.
 
 ### Premium (purchases)
 

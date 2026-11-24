@@ -202,7 +202,7 @@ final class ActivityTests: XCTestCase {
                transport: t, store: s, deviceInfo: { DeviceInfo(language: "cs", timeZone: nil, appVersion: nil, osVersion: nil) }, now: { [unowned self] in self.now }, retry: false)
     }
 
-    func testOffSendsTrackActivityFalseAndNoDailyResend() async {
+    func testOffSendsTrackActivityFalseAndStillTheDailyKeepAlive() async {
         let t = FakeTransport(), s = MemoryStore()
         let e = engine(t, s)
         _ = await e.sync()
@@ -212,7 +212,8 @@ final class ActivityTests: XCTestCase {
         let count = t.sent.count
         now = now.addingTimeInterval(25 * 3600)
         _ = await e.sync()
-        XCTAssertEqual(t.sent.count, count, "no daily resend while off: nothing changed")
+        XCTAssertEqual(t.sent.count, count + 1, "the daily send keeps the installation alive")
+        XCTAssertEqual(t.sent.last!.json!["trackActivity"] as? Bool, false)
         // Kept after a restart; back on sends again.
         let again = engine(t, s)
         await again.setActivityTracking(true)
