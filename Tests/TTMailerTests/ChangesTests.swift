@@ -193,3 +193,29 @@ final class ConcurrencyTests: XCTestCase {
         XCTAssertNil(sent, "the new installation has sent nothing")
     }
 }
+
+/// TTM-588: app activity is reported by default; the app may turn it off.
+final class ActivityTests: XCTestCase {
+    var now = Date(timeIntervalSince1970: 1_800_000_000)
+    func engine(_ t: FakeTransport, _ s: MemoryStore) -> Engine {
+        Engine(appKey: "tta_ABCDEFGHIJKLMNOPQRSTUVWX", baseURL: URL(string: "https://mailer.example.com")!, linkKey: "redirectUrl",
+               transport: t, store: s, deviceInfo: { DeviceInfo(language: "cs", timeZone: nil, appVersion: nil, osVersion: nil) }, now: { [unowned self] in self.now }, retry: false)
+    }
+
+    func testOffSendsTrackActivityFalseAndNoDailyResend() async {
+        let t = FakeTransport(), s = MemoryStore()
+        let e = engine(t, s)
+        _ = await e.sync()
+        XCTAssertNil(t.sent.last!.json!["trackActivity"], "on by default: nothing extra sent")
+        await e.setActivityTracking(false)
+        XCTAssertEqual(t.sent.last!.json!["trackActivity"] as? Bool, false)
+        let count = t.sent.count
+        now = now.addingTimeInterval(25 * 3600)
+        _ = await e.sync()
+        XCTAssertEqual(t.sent.count, count, "no daily resend while off: nothing changed")
+        // Kept after a restart; back on sends again.
+        let again = engine(t, s)
+        await again.setActivityTracking(true)
+        XCTAssertNil(t.sent.last!.json!["trackActivity"])
+    }
+}

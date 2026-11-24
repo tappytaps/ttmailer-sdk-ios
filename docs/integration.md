@@ -63,13 +63,13 @@ stops working at once. *Disable* stops an app without deleting it.
 ### Swift Package Manager (recommended)
 
 Xcode → File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios`. Choose *Up to Next Minor
-Version* from `0.2.1` and add the `TTMailer` library to the app target.
+Version* from `0.3.0` and add the `TTMailer` library to the app target.
 
 In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.2.1"),
+    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.3.0"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "TTMailer", package: "ttmailer-sdk-ios")]),
@@ -79,7 +79,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.2.1'
+pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.3.0'
 ```
 
 ### Xcode capabilities
@@ -250,6 +250,19 @@ Tags of the user's contact, for audiences in TTMailer (e.g. people who use one f
 40 at most; uppercase is lowered. They wait offline and are sent with the installation. A tag the SDK adds can be
 removed by the team in TTMailer and vice versa.
 
+### App activity
+
+TTMailer learns when the user last used the app: the SDK reports it at launch and when the app becomes active, at most
+once a day. On by default; audiences in TTMailer can then pick e.g. "used the app in the last 30 days". To turn it off
+(e.g. when the user opts out of analytics):
+
+```swift
+TTMailer.setActivityTracking(false)
+```
+
+Kept between launches. Off, the installation is still sent when it changes (token, switch, language), but never counts
+as activity.
+
 ### Premium (purchases)
 
 TTMailer keeps the user's premium (until when, its kind, since when) for audiences like "trial ended, did not buy".
@@ -372,6 +385,7 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
 | `reset() async throws` | Removes this installation and starts a new one. |
 | `deleteContact() async throws` | Erases the user's contact (account deletion). |
 | `installationId() async -> String?` | The current installation id. |
+| `setActivityTracking(_: Bool)` | App activity reporting (on by default). |
 | `setLanguage(_: String?)` | The app's own language; `nil` = the system's. |
 | `addTags(_: [String])` / `removeTags(_: [String])` | Tags of the user's contact. |
 | `setPremium(until:kind:startedAt:)` | The premium as the app knows it. |

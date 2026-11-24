@@ -71,6 +71,14 @@ public enum TTMailer {
         Task { await e.setUserId(userId) }
     }
 
+    /// Whether TTMailer learns when the user last used the app (on by default): the SDK reports it at launch and when the
+    /// app becomes active, at most once a day, for audiences like "used the app in the last 30 days". Off: the
+    /// installation is still sent when it changes, but never counts as activity. Kept between launches.
+    public static func setActivityTracking(_ enabled: Bool) {
+        guard let e = current else { return }
+        Task { await e.setActivityTracking(enabled) }
+    }
+
     /// The language the user chose in the app, when it differs from the system's (e.g. "de" or "pt-BR"); `nil` goes
     /// back to the system language. TTMailer writes to the user in it. Kept between launches.
     public static func setLanguage(_ language: String?) {

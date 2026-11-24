@@ -9,6 +9,8 @@ struct Desired: Codable, Equatable {
     var userId: String?
     /// The app's own language (TTM-584); nil = the system's.
     var language: String?
+    /// TTM-588: false = the app turned activity reporting off (nil = on, the default).
+    var trackActivity: Bool?
 }
 
 struct PendingOpen: Codable, Equatable {
@@ -91,6 +93,8 @@ actor Engine {
         await change { $0.userIdSet = true; $0.userId = (id?.isEmpty ?? true) ? nil : id }
     }
 
+    func setActivityTracking(_ enabled: Bool) async { await change { $0.trackActivity = enabled ? nil : false } }
+
     func setLanguage(_ language: String?) async {
         let l = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         await change { $0.language = (l?.isEmpty ?? true) ? nil : l }
@@ -116,6 +120,7 @@ actor Engine {
         if let v = desired.pushToken { b["pushToken"] = v }
         if let v = desired.pushEnabled { b["pushEnabled"] = v }
         if desired.userIdSet { b["userId"] = desired.userId ?? NSNull() }
+        if desired.trackActivity == false { b["trackActivity"] = false }
         return (try? JSONSerialization.data(withJSONObject: b, options: [.sortedKeys])) ?? Data("{}".utf8)
     }
 
@@ -142,7 +147,8 @@ actor Engine {
         let t = now()
         // A key TTMailer does not know (rotated, disabled, a typo): tried again after a day, not on every call.
         if let dead = date(Key.deadKeyAt), t.timeIntervalSince(dead) < Self.resendAfter { return false }
-        if store.data(forKey: Key.lastBody) == b, let at = date(Key.lastAt), t.timeIntervalSince(at) < Self.resendAfter { return true }
+        // Unchanged: sent again once a day only while activity is reported (the contact's "last active in the app").
+        if store.data(forKey: Key.lastBody) == b, let at = date(Key.lastAt), desired.trackActivity == false || t.timeIntervalSince(at) < Self.resendAfter { return true }
         let id = installationId
         switch await request("PUT", "/sdk/v1/installations/\(id)", body: b) {
         case .success(let (status, _)) where (200..<300).contains(status):
