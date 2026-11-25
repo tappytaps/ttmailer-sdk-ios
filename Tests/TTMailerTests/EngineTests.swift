@@ -55,6 +55,8 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(t.sent[0].json?["timeZone"] as? String, "Europe/Prague")
         XCTAssertEqual(t.sent[0].json?["appVersion"] as? String, "3.2.1")
         XCTAssertEqual(t.sent[0].json?["osVersion"] as? String, "18.1")
+        XCTAssertEqual(t.sent[0].json?["sdkVersion"] as? String, TTMailer.sdkVersion)
+        XCTAssertEqual(TTMailer.sdkVersion, "0.4.0")
         XCTAssertNil(t.sent[0].json?["pushToken"])
         XCTAssertNil(t.sent[0].json?["userId"], "userId not sent until the app sets it")
     }

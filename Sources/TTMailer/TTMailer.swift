@@ -16,6 +16,17 @@ public enum TTMailer {
 
     static var current: Engine? { lock.lock(); defer { lock.unlock() }; return engine }
 
+    /// The SDK's version, sent to TTMailer with the installation (`sdkVersion`) and with in-app messages.
+    public static let sdkVersion = "0.4.0"
+
+    static let defaultBaseURL = URL(string: "https://mailer.tappytaps.com")!
+    static let defaultLinkKey = "redirectUrl"
+
+    /// Deep links (a link with the app's own scheme) tapped in an in-app message shown by `handle(_:from:)`. The SDK
+    /// closes the message first, then calls this on the main thread. Without a handler the SDK opens the link through
+    /// the system.
+    nonisolated(unsafe) public static var onDeepLink: ((URL) -> Void)?
+
     /// Starts the SDK with the app key from TTMailer (Nastavení → Aplikace (SDK)).
     /// - Parameters:
     ///   - appKey: `tta_…`, the app's public key.
@@ -149,7 +160,8 @@ public enum TTMailer {
     }
 
     /// Call when the user taps a notification (`userNotificationCenter(_:didReceive:)` → `response.notification.request.content.userInfo`).
-    /// Reports the open to TTMailer and returns the push's link, if it has one.
+    /// Reports the open to TTMailer and returns the push's link, if it has one. Since 0.4.0 prefer `handle(_:from:)`,
+    /// which also opens browser links, the in-app browser and in-app messages; `opened` ignores `ttmAction`.
     @discardableResult
     public static func opened(_ userInfo: [AnyHashable: Any]) -> URL? {
         guard let e = current else { return nil }

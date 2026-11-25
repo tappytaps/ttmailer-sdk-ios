@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'TTMailer'
-  s.version          = '0.3.0'
+  s.version          = '0.4.0'
   s.summary          = 'TTMailer SDK: push token registration, newsletter sign-up with confirmation and push open reports.'
   s.description      = <<-DESC
     Small, dependency-free SDK for apps without their own backend: registers the installation and its APNs token in
@@ -16,4 +16,5 @@ Pod::Spec.new do |s|
   s.source_files     = 'Sources/TTMailer/**/*.swift'
   s.resource_bundles = { 'TTMailer_Privacy' => ['Sources/TTMailer/PrivacyInfo.xcprivacy'] }
   s.frameworks       = 'Foundation'
+  s.ios.frameworks   = 'UIKit', 'WebKit', 'SafariServices'
 end

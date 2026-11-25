@@ -12,13 +12,13 @@ privacy (App Store), troubleshooting and the API reference.
 ### Swift Package Manager (recommended)
 
 In Xcode: File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios`. Choose *Up to Next Minor
-Version* from `0.3.0` and add the `TTMailer` library to the app target.
+Version* from `0.4.0` and add the `TTMailer` library to the app target.
 
 Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.3.0"),
+    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.4.0"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "TTMailer", package: "ttmailer-sdk-ios")]),
@@ -28,7 +28,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.3.0'
+pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.4.0'
 ```
 
 The SDK includes its privacy manifest (`PrivacyInfo.xcprivacy`).
@@ -66,12 +66,18 @@ do {
     // show "Try again later"
 }
 
-// A tap on a notification:
+// A tap on a notification: reports the open and does the push's action (browser, in-app browser, in-app message).
+// It returns the link only when the app should open it itself:
 func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-    if let link = TTMailer.opened(response.notification.request.content.userInfo) {
-        // open the link (deep link or web)
+    let userInfo = response.notification.request.content.userInfo
+    await MainActor.run {
+        if let link = TTMailer.handle(userInfo) {
+            // open the link (deep link or web)
+        }
     }
 }
+// Deep links tapped in an in-app message (set at launch; without it the SDK opens them through the system):
+TTMailer.onDeepLink = { url in /* route the deep link */ }
 
 // The user deleted their account (GDPR):
 try await TTMailer.deleteContact()
@@ -86,11 +92,26 @@ TTMailer.enableAutomaticPurchases()
 TTMailer.setPremium(until: expirationDate, kind: "paid")
 ```
 
+### Taps on pushes (0.4.0)
+
+In TTMailer, a push says what a tap does ("Po klepnutí"); `handle` carries it out:
+
+- **Otevřít aplikaci** (the default, and pushes from other sources): `handle` returns the link and the app opens it.
+- **Prohlížeč**: the system browser.
+- **Prohlížeč v aplikaci**: `SFSafariViewController`; App Store / Google Play links open the store.
+- **Zpráva v aplikaci**: a full-screen message written in TTMailer (a `WKWebView` with JavaScript off, a close button,
+  "Try again" when offline). Its web links open in `SFSafariViewController`, store links in the store, a deep link
+  closes it and goes to `onDeepLink`.
+
+`opened(_:)` still works (it reports the open and returns the link, ignoring the action), but is deprecated in favour of
+`handle`. App Store review: only public APIs (`SFSafariViewController`, `WKWebView`, `UIApplication.open`), no
+entitlements and no `LSApplicationQueriesSchemes`. Details: [docs/integration.md](docs/integration.md#taps).
+
 ### What the SDK sends
 
 - On launch, on every change (token, switch, user id) and when the app becomes active (at most once a day when nothing
   changed): the installation id (a random UUID kept in the app), the push token, the switch, the user id, the device
-  language, time zone, app version and iOS version.
+  language, time zone, app version, iOS version and the SDK's version.
 - Opens: the push's `ttmToken`, with the time of the tap. Kept while offline and sent later.
 - Failed calls are retried with a growing pause while the app runs, and again on the next launch.
 

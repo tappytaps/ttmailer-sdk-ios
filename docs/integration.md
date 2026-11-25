@@ -31,8 +31,10 @@ to TTMailer from that backend. Apps without a backend use this SDK instead:
   the confirmation does the address join the installation's contact. Without a confirmation nothing is joined, so
   nobody can attach someone else's address.
 - **Push opens.** A tap on a TTMailer push is reported back, so open rates and automations work.
+- **Push actions.** A push can open its link in the browser or the in-app browser, or show an in-app message written
+  in TTMailer (`handle`, since 0.4.0).
 
-The SDK has no dependencies, supports iOS 15+ (macOS 12+ for tests) and works with both APNs and Firebase Messaging
+The SDK has no dependencies (only Apple's UIKit, WebKit and SafariServices), supports iOS 15+ (macOS 12+ for tests) and works with both APNs and Firebase Messaging
 tokens.
 
 ## 2. Set up the app in TTMailer
@@ -63,13 +65,13 @@ stops working at once. *Disable* stops an app without deleting it.
 ### Swift Package Manager (recommended)
 
 Xcode → File → Add Package Dependencies… → `https://github.com/tappytaps/ttmailer-sdk-ios`. Choose *Up to Next Minor
-Version* from `0.3.0` and add the `TTMailer` library to the app target.
+Version* from `0.4.0` and add the `TTMailer` library to the app target.
 
 In `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.3.0"),
+    .package(url: "https://github.com/tappytaps/ttmailer-sdk-ios", from: "0.4.0"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "TTMailer", package: "ttmailer-sdk-ios")]),
@@ -79,7 +81,7 @@ targets: [
 ### CocoaPods
 
 ```ruby
-pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.3.0'
+pod 'TTMailer', :git => 'https://github.com/tappytaps/ttmailer-sdk-ios.git', :tag => '0.4.0'
 ```
 
 ### Xcode capabilities
@@ -165,13 +167,17 @@ If the app has its own in-app switch, send `appSwitch && systemAllowed`.
 
 ### Taps
 
-TTMailer pushes carry `ttmToken` (for the open report) and usually a link under `redirectUrl`. When the user taps one:
+TTMailer pushes carry `ttmToken` (for the open report) and usually a link under `redirectUrl`. Since 0.4.0 a push can
+also say what a tap does (`ttmAction`, chosen in TTMailer under "Po klepnutí"). Pass every tap to `handle`:
 
 ```swift
 extension AppDelegate: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        if let link = TTMailer.opened(response.notification.request.content.userInfo) {
-            await MainActor.run { Router.open(link) }   // a deep link (storky://…) or https
+        let userInfo = response.notification.request.content.userInfo
+        await MainActor.run {
+            if let link = TTMailer.handle(userInfo) {
+                Router.open(link)   // a deep link (storky://…) or https
+            }
         }
     }
 
@@ -179,11 +185,47 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions { [.banner, .sound] }
 }
+
+// application(_:didFinishLaunchingWithOptions:): deep links tapped in an in-app message.
+TTMailer.onDeepLink = { url in Router.open(url) }
 ```
 
-`opened` returns the link at once and reports the open in the background. Pushes from other sources (no `ttmToken`)
-are not reported; `opened` returns their link if they have one under the same key. An open made offline is kept and
-sent later (the last 100 at most).
+`handle` reports the open in the background (like `opened`), then does what the push asks for:
+
+| "Po klepnutí" in TTMailer | What `handle` does | Returns |
+|---|---|---|
+| Otevřít aplikaci (the default) | Nothing: the app opens the link. | the link |
+| Prohlížeč | Opens the link in the system browser (Safari). | `nil` |
+| Prohlížeč v aplikaci | Opens the link in `SFSafariViewController`; an App Store / Google Play link opens the store. | `nil` |
+| Zpráva v aplikaci | Shows the in-app message written in TTMailer full screen, over the app. | `nil` |
+
+- **A push without an action**, or one from another source, works as before: `handle` returns its link, if it has one
+  under the link key. A push with an action this SDK version does not know is treated the same way.
+- **The presenter.** `handle(_:from:)` presents the in-app browser and the message from the view controller you pass,
+  by default from the key window's top view controller. It must be called on the main thread (it is `@MainActor`).
+- **The in-app message** is a web page from TTMailer in a `WKWebView` with JavaScript off, a close button, a loading
+  state and an error view with "Try again" (no network, or the page did not load). It follows the system's dark mode.
+  Its links:
+  - pages of TTMailer (and its click tracking) stay in the message;
+  - App Store / Google Play links open the store;
+  - other web links open in `SFSafariViewController` over the message;
+  - a close link (`ttmailer://close`) closes the message;
+  - any other scheme (a deep link like `storky://premium`) closes the message and goes to `TTMailer.onDeepLink`.
+    Without `onDeepLink` the SDK opens it through the system, which works for the app's own registered scheme too.
+- **Store links** are `apps.apple.com`, `itunes.apple.com`, `play.google.com/store…` and the schemes `itms-apps`,
+  `itms-appss` and `market`. They always open the store, from the push and from a message alike.
+- **Older SDKs.** Apps with an SDK before 0.4.0 get the same pushes: their `opened` returns the link (for a message, its
+  web address), so the app still opens something sensible. TTMailer shows how many devices run 0.4.0 or later.
+
+`opened(_:)` still works and does what it did: it reports the open and returns the link, but ignores the action. It is
+deprecated in favour of `handle` and will stay for apps that route all links themselves. An open made offline is kept
+and sent later (the last 100 at most); pushes without `ttmToken` are not reported.
+
+#### App Store review
+
+The in-app browser is Apple's `SFSafariViewController` and the message a plain `WKWebView`; the SDK uses only public
+APIs, needs no entitlement and no `LSApplicationQueriesSchemes` (it opens URLs with `UIApplication.open` and never asks
+`canOpenURL`). The SDK's code for this does not run in app extensions (`handle` is unavailable there).
 
 ## 6. User accounts
 
@@ -321,7 +363,7 @@ try await TTMailer.reset()           // a "reset app" / "sign out everywhere" ac
 - **When it sends.**
   - The installation is sent at launch, on every change and when the app becomes active.
   - It holds the installation id (a random UUID), the token, the switch, the user id, the device language, time zone,
-    app version and iOS version (or the language set with `setLanguage`).
+    app version, iOS version and the SDK's version (or the language set with `setLanguage`).
   - It is not sent when nothing changed and the last send is less than a day old. The daily send keeps "last active in
     the app" on the contact.
 - **Offline.**
@@ -366,7 +408,7 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
   - Check the project's APNs credentials and the bundle id of the app in TTMailer.
   - A development build gets sandbox tokens: TTMailer must send it through the APNs sandbox.
 - **The push arrives, but the open is not counted.** `UNUserNotificationCenter.current().delegate` must be set before
-  `application(_:didFinishLaunchingWithOptions:)` returns, and `didReceive` must call `TTMailer.opened`.
+  `application(_:didFinishLaunchingWithOptions:)` returns, and `didReceive` must call `TTMailer.handle` (or `opened`).
 - **`subscribe` fails with `noForm` / `formWithoutConfirmation`.** Fix the app's form in TTMailer (section 2).
 - **Everything fails with a 404 in the log.** The key is wrong, rotated or disabled, or the project is archived.
 - **A test server.** `TTMailer.configure(appKey:baseURL:)` with its URL and a key from that server.
@@ -381,7 +423,10 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
 | `setPushEnabled(_: Bool)` | The user's notification choice; writes the app's push topic. |
 | `setUserId(_: String?)` | The account id after sign-in; `nil` after sign-out. |
 | `subscribe(email:language:) async throws -> Bool` | The newsletter sign-up with a confirmation e-mail. |
-| `opened(_: [AnyHashable: Any]) -> URL?` | Reports a tap on a push; returns its link. |
+| `handle(_: [AnyHashable: Any], from: UIViewController? = nil) -> URL?` | `@MainActor`. Reports a tap on a push and does its action (browser, in-app browser, in-app message); returns the link only when the app should open it. |
+| `onDeepLink: ((URL) -> Void)?` | Deep links tapped in an in-app message (after it closes). Without it the SDK opens them through the system. |
+| `opened(_: [AnyHashable: Any]) -> URL?` | Deprecated in favour of `handle`: reports a tap on a push; returns its link, ignores the action. |
+| `sdkVersion: String` | The SDK's version (`"0.4.0"`). |
 | `reset() async throws` | Removes this installation and starts a new one. |
 | `deleteContact() async throws` | Erases the user's contact (account deletion). |
 | `installationId() async -> String?` | The current installation id. |
@@ -410,11 +455,12 @@ The SDK is a thin client of TTMailer's public SDK API. Every call carries the he
 
 | Call | Used by |
 |---|---|
-| `PUT /sdk/v1/installations/{installationId}` with `{pushToken, pushEnabled, language, timeZone, appVersion, osVersion, userId}` | sync |
+| `PUT /sdk/v1/installations/{installationId}` with `{pushToken, pushEnabled, language, timeZone, appVersion, osVersion, sdkVersion, userId}` | sync |
 | `POST /sdk/v1/installations/{installationId}/subscribe` with `{email, language}` | `subscribe` |
 | `DELETE /sdk/v1/installations/{installationId}` | `reset` |
 | `DELETE /sdk/v1/installations/{installationId}/contact` | `deleteContact` |
-| `POST /p/open` with `{t: ttmToken, at}` (no key) | `opened` |
+| `POST /p/open` with `{t: ttmToken, at}` (no key) | `handle`, `opened` |
+| `GET <ttmUrl>` (the in-app message page) with the header `X-TTMailer-SDK: <sdkVersion>` (no key) | `handle` |
 
 Limits:
 - 300 calls per IP address and minute;

@@ -117,6 +117,7 @@ actor Engine {
         if let v = info.timeZone { b["timeZone"] = v }
         if let v = info.appVersion { b["appVersion"] = v }
         if let v = info.osVersion { b["osVersion"] = v }
+        b["sdkVersion"] = TTMailer.sdkVersion
         if let v = desired.pushToken { b["pushToken"] = v }
         if let v = desired.pushEnabled { b["pushEnabled"] = v }
         if desired.userIdSet { b["userId"] = desired.userId ?? NSNull() }
