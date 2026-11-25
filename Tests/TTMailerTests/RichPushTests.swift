@@ -93,14 +93,27 @@ final class RichPushTests: XCTestCase {
 
     // MARK: - Navigation in the message
 
-    let hosts: Set<String> = ["mailer.example"]
-    func decide(_ s: String, main: Bool = true) -> MessageNavigation { MessageNavigation.decide(u(s), mainFrame: main, ttmailerHosts: hosts) }
+    let hosts: Set<String> = ["mailer.example", "pub.mailer.example"]
+    let schemes: Set<String> = ["storky", "fb123"]
+    func decide(_ s: String, main: Bool = true, header: Bool = true, initial: Bool = false) -> MessageNavigation {
+        MessageNavigation.decide(u(s), mainFrame: main, ttmailerHosts: hosts, appSchemes: schemes, hasHeader: header, initialBlank: initial)
+    }
 
     func testTtmailerPagesAndClickRedirectsStayInTheWebView() {
         XCTAssertEqual(decide("https://mailer.example/p/m/tok"), .allow)
         XCTAssertEqual(decide("https://MAILER.example/c/abc"), .allow)
-        XCTAssertEqual(decide("http://mailer.example/c/abc"), .allow)
-        XCTAssertEqual(decide("about:blank"), .allow)
+        XCTAssertEqual(decide("https://pub.mailer.example/c/abc"), .allow)
+    }
+
+    func testATtmailerLoadWithoutTheHeaderIsLoadedAgainWithIt() {
+        XCTAssertEqual(decide("https://mailer.example/c/abc", header: false), .reloadWithHeader)
+        XCTAssertEqual(decide("https://shop.example/x", header: false), .browser(u("https://shop.example/x")))
+    }
+
+    func testTtmailerHostsAreHttpsOnlyAndExact() {
+        XCTAssertEqual(decide("http://mailer.example/c/abc"), .browser(u("http://mailer.example/c/abc")))
+        XCTAssertEqual(decide("https://evil.mailer.example.com/x"), .browser(u("https://evil.mailer.example.com/x")))
+        XCTAssertEqual(decide("https://x.mailer.example/x"), .browser(u("https://x.mailer.example/x")))
     }
 
     func testTheFinalTargetsAreHandledOutside() {
@@ -110,24 +123,63 @@ final class RichPushTests: XCTestCase {
         XCTAssertEqual(decide("https://apps.apple.com/app/id1"), .store(u("https://apps.apple.com/app/id1")))
         XCTAssertEqual(decide("market://details?id=x"), .store(u("market://details?id=x")))
         XCTAssertEqual(decide("https://shop.example/sale"), .browser(u("https://shop.example/sale")))
+    }
+
+    func testOnlyTheAppsOwnSchemesAreDeepLinks() {
         XCTAssertEqual(decide("storky://premium"), .deepLink(u("storky://premium")))
-        XCTAssertEqual(decide("mailto:a@b.cz"), .deepLink(u("mailto:a@b.cz")))
+        XCTAssertEqual(decide("STORKY://premium"), .deepLink(u("STORKY://premium")))
+        XCTAssertEqual(decide("fb123://auth"), .deepLink(u("fb123://auth")))
+        for s in ["mailto:a@b.cz", "tel:+420123", "sms:+420123", "maps://?q=Brno", "facetime://a@b.cz", "otherapp://x"] {
+            XCTAssertEqual(decide(s), .system(u(s)), s)
+        }
     }
 
-    func testOtherHostsAreNotTtmailer() {
-        XCTAssertEqual(decide("https://evil.mailer.example.com/x"), .browser(u("https://evil.mailer.example.com/x")))
+    func testNothingRunsScriptsOrLocalFiles() {
+        for s in ["javascript:alert(1)", "data:text/html,hi", "blob:https://mailer.example/1", "file:///etc/passwd",
+                  "content://x", "about:srcdoc", "about:blank"] {
+            XCTAssertEqual(decide(s), .cancel, s)
+        }
+        XCTAssertEqual(decide("about:blank", initial: true), .allow)
+        XCTAssertEqual(decide("about:srcdoc", initial: true), .cancel)
     }
 
-    func testNothingRunsScripts() {
-        XCTAssertEqual(decide("javascript:alert(1)"), .cancel)
-        XCTAssertEqual(decide("data:text/html,hi"), .cancel)
-    }
-
-    func testFramesNeverLeaveTheWebView() {
+    func testFramesNeverLeaveTheWebViewAndNeverClose() {
         XCTAssertEqual(decide("https://video.example/embed", main: false), .allow)
-        XCTAssertEqual(decide("storky://x", main: false), .cancel)
+        XCTAssertEqual(decide("https://mailer.example/x", main: false, header: false), .allow)
         XCTAssertEqual(decide("https://apps.apple.com/app/id1", main: false), .allow)
-        XCTAssertEqual(decide("ttmailer://close", main: false), .close)
+        XCTAssertEqual(decide("storky://x", main: false), .cancel)
+        XCTAssertEqual(decide("mailto:a@b.cz", main: false), .cancel)
+        XCTAssertEqual(decide("ttmailer://close", main: false), .cancel)
+        XCTAssertEqual(decide("javascript:alert(1)", main: false), .cancel)
+    }
+
+    func testTheAppsSchemesComeFromInfoPlist() {
+        let info: [String: Any] = ["CFBundleURLTypes": [
+            ["CFBundleURLName": "main", "CFBundleURLSchemes": ["Storky", "storky-dev"]],
+            ["CFBundleURLSchemes": ["fb123"]],
+            ["CFBundleURLName": "broken"],
+        ]]
+        XCTAssertEqual(MessageNavigation.appSchemes(info), ["storky", "storky-dev", "fb123"])
+        XCTAssertEqual(MessageNavigation.appSchemes(nil), [])
+        XCTAssertEqual(MessageNavigation.appSchemes(["CFBundleURLTypes": "x"]), [])
+    }
+
+    // MARK: - Loading the message
+
+    func testErrorsReplaceTheMessageOnlyOnTheFirstLoad() {
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, status: 200), .ok)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, status: 302), .ok)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, status: 404), .errorView)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, status: 500), .errorView)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: true, status: 500), .notice)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, error: URLError(.notConnectedToInternet)), .errorView)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: true, error: URLError(.notConnectedToInternet)), .notice)
+    }
+
+    func testNavigationsTheSdkCancelledAreNoErrors() {
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, error: URLError(.cancelled)), .ignore)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, error: NSError(domain: "WebKitErrorDomain", code: 102)), .ignore)
+        XCTAssertEqual(MessageLoad.outcome(loadedOnce: false, error: NSError(domain: "WebKitErrorDomain", code: 101)), .errorView)
     }
 
     // MARK: - Texts
@@ -138,5 +190,7 @@ final class RichPushTests: XCTestCase {
         XCTAssertEqual(MessageStrings.forLanguage("pt_BR").tryAgain, "Tentar novamente")
         XCTAssertEqual(MessageStrings.forLanguage("ja").tryAgain, "Try again")
         XCTAssertEqual(MessageStrings.forLanguage(nil).tryAgain, "Try again")
+        XCTAssertEqual(MessageStrings.forLanguage("cs").loading, "Načítání zprávy")
+        XCTAssertEqual(MessageStrings.forLanguage("en").loaded, "Message loaded")
     }
 }

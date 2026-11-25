@@ -279,13 +279,17 @@ actor Engine {
 
     /// The link of the push (data key `linkKey`) and an open report queued when the push carries `ttmToken`.
     func opened(_ userInfo: [AnyHashable: Any]) -> URL? {
-        if let token = userInfo["ttmToken"] as? String, !token.isEmpty, token.count <= 256 {
-            var opens = loadOpens()
-            opens.append(PendingOpen(token: token, at: Self.iso(now())))
-            saveOpens(Array(opens.suffix(Self.maxPendingOpens)))
-        }
+        recordOpen(token: userInfo["ttmToken"] as? String)
         guard let link = userInfo[linkKey] as? String, let url = URL(string: link), url.scheme != nil else { return nil }
         return url
+    }
+
+    /// Queues the open report of a push's `ttmToken` (nothing without one).
+    func recordOpen(token: String?) {
+        guard let token, !token.isEmpty, token.count <= 256 else { return }
+        var opens = loadOpens()
+        opens.append(PendingOpen(token: token, at: Self.iso(now())))
+        saveOpens(Array(opens.suffix(Self.maxPendingOpens)))
     }
 
     /// Sends the queued open reports: dropped on 2xx and on 4xx (except 408 and 429), kept for later otherwise.

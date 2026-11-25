@@ -97,11 +97,12 @@ TTMailer.setPremium(until: expirationDate, kind: "paid")
 In TTMailer, a push says what a tap does ("Po klepnutí"); `handle` carries it out:
 
 - **Otevřít aplikaci** (the default, and pushes from other sources): `handle` returns the link and the app opens it.
-- **Prohlížeč**: the system browser.
+- **Prohlížeč**: a system open (Safari, or the app of a universal link).
 - **Prohlížeč v aplikaci**: `SFSafariViewController`; App Store / Google Play links open the store.
 - **Zpráva v aplikaci**: a full-screen message written in TTMailer (a `WKWebView` with JavaScript off, a close button,
-  "Try again" when offline). Its web links open in `SFSafariViewController`, store links in the store, a deep link
-  closes it and goes to `onDeepLink`.
+  "Try again" when it cannot load). Its web links open in `SFSafariViewController`, store links in the store; a link
+  with the app's own scheme closes it and goes to `onDeepLink`, other schemes (`mailto:`, `tel:`…) open through the
+  system.
 
 `opened(_:)` still works (it reports the open and returns the link, ignoring the action), but is deprecated in favour of
 `handle`. App Store review: only public APIs (`SFSafariViewController`, `WKWebView`, `UIApplication.open`), no
@@ -122,5 +123,6 @@ entitlements and no `LSApplicationQueriesSchemes`. Details: [docs/integration.md
 ```sh
 swift test                                                   # unit tests (macOS)
 xcodebuild -scheme TTMailer -destination 'generic/platform=iOS' build
+xcodebuild -scheme TTMailer -destination 'platform=iOS Simulator,name=<simulator>' test   # + UIKit/WebKit tests
 pod lib lint --allow-warnings
 ```

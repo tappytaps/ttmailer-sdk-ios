@@ -158,6 +158,20 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(t.sent.filter { $0.path == "/p/open" }.count, 3)
     }
 
+    func testRecordOpenTakesOnlyTheToken() async {
+        let t = FakeTransport(), s = MemoryStore()
+        let e = engine(t, s)
+        await e.recordOpen(token: "x.y")
+        await e.recordOpen(token: nil)
+        await e.recordOpen(token: "")
+        var pending = await e.pendingOpens
+        XCTAssertEqual(pending, 1)
+        await e.flushOpens()
+        XCTAssertEqual(t.sent.first { $0.path == "/p/open" }?.json?["t"] as? String, "x.y")
+        pending = await e.pendingOpens
+        XCTAssertEqual(pending, 0)
+    }
+
     func testAPushWithoutTheTokenIsNotReported() async {
         let t = FakeTransport(), s = MemoryStore()
         let e = engine(t, s)

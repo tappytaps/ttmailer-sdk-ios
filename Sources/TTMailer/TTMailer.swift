@@ -25,7 +25,7 @@ public enum TTMailer {
     /// Deep links (a link with the app's own scheme) tapped in an in-app message shown by `handle(_:from:)`. The SDK
     /// closes the message first, then calls this on the main thread. Without a handler the SDK opens the link through
     /// the system.
-    nonisolated(unsafe) public static var onDeepLink: ((URL) -> Void)?
+    @MainActor public static var onDeepLink: (@MainActor (URL) -> Void)?
 
     /// Starts the SDK with the app key from TTMailer (Nastavení → Aplikace (SDK)).
     /// - Parameters:
@@ -167,7 +167,7 @@ public enum TTMailer {
         guard let e = current else { return nil }
         let link = linkOf(userInfo, key: e.linkKey)
         let token = userInfo["ttmToken"] as? String
-        Task { _ = await e.opened(token.map { ["ttmToken": $0] } ?? [:]); await e.flushOpens() }
+        Task { await e.recordOpen(token: token); await e.flushOpens() }
         return link
     }
 

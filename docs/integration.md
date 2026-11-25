@@ -195,23 +195,32 @@ TTMailer.onDeepLink = { url in Router.open(url) }
 | "Po klepnutí" in TTMailer | What `handle` does | Returns |
 |---|---|---|
 | Otevřít aplikaci (the default) | Nothing: the app opens the link. | the link |
-| Prohlížeč | Opens the link in the system browser (Safari). | `nil` |
+| Prohlížeč | Opens the link through the system: Safari, or the app of a universal link (the system decides). | `nil` |
 | Prohlížeč v aplikaci | Opens the link in `SFSafariViewController`; an App Store / Google Play link opens the store. | `nil` |
 | Zpráva v aplikaci | Shows the in-app message written in TTMailer full screen, over the app. | `nil` |
 
 - **A push without an action**, or one from another source, works as before: `handle` returns its link, if it has one
   under the link key. A push with an action this SDK version does not know is treated the same way.
-- **The presenter.** `handle(_:from:)` presents the in-app browser and the message from the view controller you pass,
-  by default from the key window's top view controller. It must be called on the main thread (it is `@MainActor`).
+- **The presenter.** `handle(_:from:)` presents the in-app browser and the message over the view controller you pass
+  (or whatever it already presents), by default over the key window's top view controller. It must be called on the
+  main thread (it is `@MainActor`).
+- **A cold start.** When the app was launched by the tap and its UI is not on screen yet (or an alert is showing), the
+  SDK waits up to 5 seconds for it. If it never comes, the in-app browser link and the message's web version open
+  through the system instead.
 - **The in-app message** is a web page from TTMailer in a `WKWebView` with JavaScript off, a close button, a loading
-  state and an error view with "Try again" (no network, or the page did not load). It follows the system's dark mode.
-  Its links:
-  - pages of TTMailer (and its click tracking) stay in the message;
-  - App Store / Google Play links open the store;
+  state (announced to VoiceOver) and an error view with "Try again" when the first load fails (no network, HTTP ≥ 400).
+  A failure after the message has loaded (e.g. a link offline) keeps the message and shows a short notice. The
+  screen's chrome follows dark mode; the page itself follows it when the project's message layout supports it
+  (TTMailer's default layout does). Its links:
+  - pages of TTMailer (https, its host and the message's host) and its click tracking stay in the message;
+  - App Store / Google Play links open the store, the message stays;
   - other web links open in `SFSafariViewController` over the message;
   - a close link (`ttmailer://close`) closes the message;
-  - any other scheme (a deep link like `storky://premium`) closes the message and goes to `TTMailer.onDeepLink`.
-    Without `onDeepLink` the SDK opens it through the system, which works for the app's own registered scheme too.
+  - **the app's own schemes** (`CFBundleURLSchemes` in its Info.plist, e.g. `storky://premium`) close the message and
+    go to `TTMailer.onDeepLink`; without `onDeepLink` the SDK opens them through the system (the app gets them in its
+    usual URL handler);
+  - other schemes (`mailto:`, `tel:`, `sms:`, `maps:`, other apps) open through the system, the message stays;
+  - `javascript:`, `data:`, `blob:`, `file:` and `about:` links do nothing. Frames inside the page never leave it.
 - **Store links** are `apps.apple.com`, `itunes.apple.com`, `play.google.com/store…` and the schemes `itms-apps`,
   `itms-appss` and `market`. They always open the store, from the push and from a message alike.
 - **Older SDKs.** Apps with an SDK before 0.4.0 get the same pushes: their `opened` returns the link (for a message, its
@@ -424,7 +433,7 @@ The SDK ships a privacy manifest (`PrivacyInfo.xcprivacy`) with these data types
 | `setUserId(_: String?)` | The account id after sign-in; `nil` after sign-out. |
 | `subscribe(email:language:) async throws -> Bool` | The newsletter sign-up with a confirmation e-mail. |
 | `handle(_: [AnyHashable: Any], from: UIViewController? = nil) -> URL?` | `@MainActor`. Reports a tap on a push and does its action (browser, in-app browser, in-app message); returns the link only when the app should open it. |
-| `onDeepLink: ((URL) -> Void)?` | Deep links tapped in an in-app message (after it closes). Without it the SDK opens them through the system. |
+| `onDeepLink: (@MainActor (URL) -> Void)?` | `@MainActor`. The app's own deep links tapped in an in-app message (after it closes). Without it the SDK opens them through the system. |
 | `opened(_: [AnyHashable: Any]) -> URL?` | Deprecated in favour of `handle`: reports a tap on a push; returns its link, ignores the action. |
 | `sdkVersion: String` | The SDK's version (`"0.4.0"`). |
 | `reset() async throws` | Removes this installation and starts a new one. |
@@ -460,7 +469,7 @@ The SDK is a thin client of TTMailer's public SDK API. Every call carries the he
 | `DELETE /sdk/v1/installations/{installationId}` | `reset` |
 | `DELETE /sdk/v1/installations/{installationId}/contact` | `deleteContact` |
 | `POST /p/open` with `{t: ttmToken, at}` (no key) | `handle`, `opened` |
-| `GET <ttmUrl>` (the in-app message page) with the header `X-TTMailer-SDK: <sdkVersion>` (no key) | `handle` |
+| `GET <ttmUrl>` (the in-app message page) and its TTMailer links, each with the header `X-TTMailer-SDK: <sdkVersion>` (no key) | `handle` |
 
 Limits:
 - 300 calls per IP address and minute;
